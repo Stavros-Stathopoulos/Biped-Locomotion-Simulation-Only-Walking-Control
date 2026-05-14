@@ -61,7 +61,7 @@ The core objective is to enable the humanoid robot to walk by continuously movin
 
 ---
 
-#### Relevant Methodes
+#### Relevant Methods
 
 Finite-state machines, center-of-mass planning, zeromoment point (ZMP) control, linear inverted pendulum models (LIPM), capture point methods, model predictive control, inverse kinematics, whole-body control, trajectory optimization, and stability analysis.
 
