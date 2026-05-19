@@ -2,7 +2,7 @@ import logging
 import sys
 from datetime import datetime
 
-class CustomFormatter(logging.Formatter):
+class TerminalFormatter(logging.Formatter):
     """Custom logging formatter to meet specific format and color requirements."""
     
     # ANSI color codes
@@ -39,10 +39,10 @@ def get_logger(name="robotics_logger"):
     if not logger.handlers:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.DEBUG)
-        console_handler.setFormatter(CustomFormatter())
+        console_handler.setFormatter(TerminalFormatter())
         logger.addHandler(console_handler)
         
     return logger
 
 # Initialize the default logger
-logger = get_logger()
+TerminalLogger = get_logger()
