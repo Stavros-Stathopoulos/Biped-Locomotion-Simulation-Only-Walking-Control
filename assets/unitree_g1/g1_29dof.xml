@@ -2,7 +2,7 @@
   <compiler angle="radian" meshdir="meshes"/>
   <default>
     <default class="physics">
-      <joint damping="20" armature="0.05"/>
+      <joint armature="0.05"/>
     </default>
   </default>
 
