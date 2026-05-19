@@ -1,0 +1,6 @@
+physics:
+  gravity: [0, 0, -9.81]
+  solver_iterations: 50
+
+  override_joint_damping: true
+  default_damping: 15.0
