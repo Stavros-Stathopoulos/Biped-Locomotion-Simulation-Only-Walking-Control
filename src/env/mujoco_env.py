@@ -5,7 +5,7 @@ import mujoco.viewer
 import numpy as np
 
 from src.utils.config_parser import SimConfig
-from src.utils.terminal_logger import TerminalLogger as Logger
+from src.utils.logger.terminal_logger import TerminalLogger as Logger
 
 class MujocoEnv:
     def __init__(self, config: SimConfig):

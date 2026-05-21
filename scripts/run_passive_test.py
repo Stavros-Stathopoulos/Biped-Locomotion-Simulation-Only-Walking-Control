@@ -4,9 +4,9 @@ import time
 # Appending src directory to system path for modular import execution
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.utils.config_parser import SimConfig
 from src.env.mujoco_env import MujocoEnv
-from src.utils.terminal_logger import TerminalLogger as logger
+from src.utils.config_parser import SimConfig
+from src.utils.logger.terminal_logger import TerminalLogger as logger
 
 def main():
     logger.info("Initializing passive stability test for Unitree Go1 robot...")
