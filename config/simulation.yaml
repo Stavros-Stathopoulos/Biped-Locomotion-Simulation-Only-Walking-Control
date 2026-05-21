@@ -1,0 +1,10 @@
+environment:
+  scene_xml_path: ../assets/unitree_g1/scene.xml
+
+timing:
+  sim_frequency_hz: 500
+
+physics:
+  gravity: [0, 0, -9.81]
+  override_joint_damping: true
+  default_damping: 15.0

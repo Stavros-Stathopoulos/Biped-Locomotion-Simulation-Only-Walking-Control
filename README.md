@@ -10,18 +10,18 @@ This repository contains the final project for the course ECE_DK801 Robotics Sys
 - [Project Description](#project-description)
   - [Robot](#robot)
   - [Deployment](#deployment)
-  - [Desription](#description)
+  - [Description](#description)
   - [Core Tasks](#core-tasks)
   - [Relevant Methods](#relevant-methods)
   - [Evaluation](#evaluation)
 - [Runbook](#runbook)
-- [Refrences](#refrences)
+- [References](#references)
 
 ## Team
 
 Team 5 
 
-### Teammembers
+### Team Members
 
 - Mpantekas Nikolaos up1092562
 - Stathopoulos Stavros up1101069
@@ -32,7 +32,7 @@ Team 5
 
 ### Project 5: 
 
-Biped Locomotion Challenge - Simulation - only Walking Control
+Biped Locomotion Challenge - Simulation-only Walking Control
 
 #### Robot
 
@@ -44,9 +44,9 @@ MuJoCo simulation environment
 
 #### Description
 
-In this project, teams will develop a simulated bipedal walking controller capable of generating stable locomotion through dynamic balance and centerof-mass control. The project is simulation-only and focuses on the fundamental principles of humanoid walking, including balance maintenance, weight shifting, and stable foot-to-foot transitions. 
+In this project, teams will develop a simulated bipedal walking controller capable of generating stable locomotion through dynamic balance and center-of-mass control. The project is simulation-only and focuses on the fundamental principles of humanoid walking, including balance maintenance, weight shifting, and stable foot-to-foot transitions. 
 
-The core objective is to enable the humanoid robot to walk by continuously moving its center of mass (CoM) over the supporting foot during each step. Teams must design controllers that coordinate the robot’s posture, balance, and stepping behavior so that stable single-support phases can be achieved without falling.
+The core objective is to enable the humanoid robot to walk by continuously moving its center of mass (CoM) over the supporting foot during each step. Teams must design controllers that coordinate the robot's posture, balance, and stepping behavior so that stable single-support phases can be achieved without falling.
 
 ---
 
@@ -54,16 +54,16 @@ The core objective is to enable the humanoid robot to walk by continuously movin
 
 - Generate stable walking motions for a simulated humanoid robot.
 - Plan and control center-of-mass (CoM) trajectories to achieve stable locomotion.
-- Shift the robot’s weight appropriately to stabilize over the supporting foot during single-support phases.
+- Shift the robot's weight appropriately to stabilize over the supporting foot during single-support phases.
 - Coordinate foot placement and body motion to enable continuous stepping and balance maintenance.
-- Maintain stability during transitions between double-support and singlesupport phases.
+- Maintain stability during transitions between double-support and single-support phases.
 - Recover from small disturbances, balance errors, or imperfect foot placements during walking.
 
 ---
 
 #### Relevant Methods
 
-Finite-state machines, center-of-mass planning, zeromoment point (ZMP) control, linear inverted pendulum models (LIPM), capture point methods, model predictive control, inverse kinematics, whole-body control, trajectory optimization, and stability analysis.
+Finite-state machines, center-of-mass planning, zero-moment point (ZMP) control, linear inverted pendulum models (LIPM), capture point methods, model predictive control, inverse kinematics, whole-body control, trajectory optimization, and stability analysis.
 
 ---
 
@@ -75,8 +75,47 @@ Teams will be evaluated based on their ability to achieve stable continuous walk
 
 ## Runbook
 
+### Prerequisites
+
+- Python 3.10+
+- [MuJoCo](https://github.com/google-deepmind/mujoco) physics engine
+
+Install dependencies:
+
+```bash
+pip install mujoco numpy pyyaml
+```
+
+### Repository Structure
+
+```
+ECE_DK801-Robotics-Systems-I/
+├── assets/unitree_g1/      # MJCF/URDF robot model and meshes
+├── config/                 # Runtime parameters (YAML)
+├── docs/                   # Datasheets, books, and papers
+├── logs/                   # Generated at runtime by DataLogger
+├── scripts/                # Executable entry points
+└── src/                    # Reusable library modules
+    ├── env/                # MuJoCo environment wrapper
+    ├── controllers/        # Control algorithms
+    └── utils/              # Logging and helper utilities
+```
+
+### Running the Passive Stability Test
+
+Verifies that the G1 robot can stand passively for 2 seconds with zero control input.
+
+```bash
+# From the project root
+python scripts/run_passive_test.py
+```
+
+The script loads `assets/unitree_g1/scene.xml`, resets to the `stand` keyframe, and runs the simulation at 500 Hz. A MuJoCo viewer window opens automatically. The test passes if the robot does not collapse within 2 simulated seconds.
+
 ---
 
-## Refrences
+## References
 
----
+- Unitree G1 Robot: https://www.unitree.com/g1/
+- MuJoCo Physics Engine: https://mujoco.readthedocs.io/
+
