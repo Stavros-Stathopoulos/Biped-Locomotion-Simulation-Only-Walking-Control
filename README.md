@@ -19,7 +19,7 @@ This repository contains the final project for the course ECE_DK801 Robotics Sys
 
 ## Team
 
-Team 5 
+Team 5
 
 ### Team Members
 
@@ -30,7 +30,7 @@ Team 5
 
 ## Project Description
 
-### Project 5: 
+### Project 5
 
 Biped Locomotion Challenge - Simulation-only Walking Control
 
@@ -44,7 +44,7 @@ MuJoCo simulation environment
 
 #### Description
 
-In this project, teams will develop a simulated bipedal walking controller capable of generating stable locomotion through dynamic balance and center-of-mass control. The project is simulation-only and focuses on the fundamental principles of humanoid walking, including balance maintenance, weight shifting, and stable foot-to-foot transitions. 
+In this project, teams will develop a simulated bipedal walking controller capable of generating stable locomotion through dynamic balance and center-of-mass control. The project is simulation-only and focuses on the fundamental principles of humanoid walking, including balance maintenance, weight shifting, and stable foot-to-foot transitions.
 
 The core objective is to enable the humanoid robot to walk by continuously moving its center of mass (CoM) over the supporting foot during each step. Teams must design controllers that coordinate the robot's posture, balance, and stepping behavior so that stable single-support phases can be achieved without falling.
 
@@ -88,7 +88,7 @@ pip install mujoco numpy pyyaml
 
 ### Repository Structure
 
-```
+```bash
 ECE_DK801-Robotics-Systems-I/
 ├── assets/unitree_g1/      # MJCF/URDF robot model and meshes
 ├── config/                 # Runtime parameters (YAML)
@@ -116,6 +116,5 @@ The script loads `assets/unitree_g1/scene.xml`, resets to the `stand` keyframe, 
 
 ## References
 
-- Unitree G1 Robot: https://www.unitree.com/g1/
-- MuJoCo Physics Engine: https://mujoco.readthedocs.io/
-
+- Unitree G1 Robot: [https://www.unitree.com/g1/]
+- MuJoCo Physics Engine: [https://mujoco.readthedocs.io/]
