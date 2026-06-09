@@ -12,12 +12,14 @@ All joint angles lie within the joint ranges declared in g1_29dof.xml.
 Pelvis height is adjusted programmatically so the lowest contact sphere
 barely touches the floor before simulation begins.
 
-Controller: vectorized joint-space PD + gravity/Coriolis feed-forward.
-Gains are tuned analytically, accounting for:
-  - Joint inertia and max torque (hips/knees ±88/±139 Nm carry full body load)
-  - Armature (0.05 kg·m² reflected at each joint from the MJCF default)
-  - Gravity compensation handling the steady-state load, so PD gains only
-    need to handle transients and disturbances
+Controller: vectorized joint-space PD feedback only — no gravity feed-forward.
+Gravity is the disturbance; the PD gains are the mechanism that must reject it.
+Pelvis-pitch → ankle correction damps forward tippling.
+
+Gains are tuned to satisfy the marginal stability condition:
+  2 * Kp_ankle > m * g * h_com  →  Kp_ankle > ~113 Nm/rad  (G1: m=35 kg, h≈0.66 m)
+Ankle Kp=250 gives a ~2.2× stability margin. A small steady-state position
+offset (q_eq ≠ q_ref) is expected: e_ss = τ_gravity / Kp per joint.
 
 Acceptance criteria:
   [x] compute_torques: zero dynamic allocation, zero Python loops on hot path
@@ -27,6 +29,7 @@ Acceptance criteria:
 
 import sys
 import os
+import math
 import time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -96,42 +99,49 @@ Q_CROUCH: np.ndarray = np.array([
 ], dtype=np.float64)
 
 # ── Proportional gains (Nm/rad) ───────────────────────────────────────────────
-# Design rationale:
-#   ω_n = sqrt(Kp / I_eff)  with I_eff ≈ arm_inertia + armature (0.05 kg·m²)
-#   Damping ratio ζ ≈ Kd / (2 * sqrt(Kp * I_eff))  →  target ζ ≈ 0.7–1.0
-#   Gravity compensation handles steady-state; PD handles perturbations only.
-#   All torques are clamped to jnt_actfrcrange in the controller.
+# Ankle Kp=250 satisfies: 2*Kp_ankle > m*g*h_com  (stability margin ≈ 2.2×).
+# Hip-pitch Kp=400, knee Kp=450 chosen for stiff posture under body load.
 KP: np.ndarray = np.array([
-    # left leg
-    250.0, 200.0, 150.0,  350.0, 100.0,  80.0,
+    # left leg:  hip_pitch  hip_roll  hip_yaw  knee   ankle_pitch  ankle_roll
+         400.0,    200.0,   150.0,  450.0,    250.0,      100.0,
     # right leg
-    250.0, 200.0, 150.0,  350.0, 100.0,  80.0,
+         400.0,    200.0,   150.0,  450.0,    250.0,      100.0,
     # waist
-    200.0, 150.0, 150.0,
+         200.0,    150.0,   200.0,
     # left arm
-     60.0,  60.0,  40.0,   60.0,  30.0,  15.0,  15.0,
+          80.0,     80.0,    50.0,   80.0,     40.0,       20.0,   20.0,
     # right arm
-     60.0,  60.0,  40.0,   60.0,  30.0,  15.0,  15.0,
+          80.0,     80.0,    50.0,   80.0,     40.0,       20.0,   20.0,
 ], dtype=np.float64)
 
 # ── Derivative gains (Nm·s/rad) ───────────────────────────────────────────────
-# ζ ≈ 0.7 for legs/waist, ζ ≈ 0.9 for arms (arms are lightly loaded so more
-# damping helps prevent oscillation from low-inertia wrist links).
+# Ankle Kd=20 → ζ ≈ 0.63 with Kp=250, I_eff≈0.25 kg·m².
 KD: np.ndarray = np.array([
-    # left leg
-    8.0,  6.0,  5.0,  10.0,  4.0,  3.0,
+    # left leg:  hp    hr    hy   kn    ap    ar
+          15.0,  8.0,  6.0, 18.0, 20.0,  5.0,
     # right leg
-    8.0,  6.0,  5.0,  10.0,  4.0,  3.0,
+          15.0,  8.0,  6.0, 18.0, 20.0,  5.0,
     # waist
-    6.0,  5.0,  5.0,
+           8.0,  6.0,  8.0,
     # left arm
-    2.0,  2.0,  1.5,   2.0,  1.0,  0.5,  0.5,
+           3.0,  3.0,  2.0,  3.0,  1.5,  0.8,  0.8,
     # right arm
-    2.0,  2.0,  1.5,   2.0,  1.0,  0.5,  0.5,
+           3.0,  3.0,  2.0,  3.0,  1.5,  0.8,  0.8,
 ], dtype=np.float64)
 
+# ── Balance feedback ───────────────────────────────────────────────────────────
+# When the pelvis pitches forward (positive pelvis_pitch), increase ankle
+# plantarflexion target (more negative ankle_pitch) to push CoM back.
+_K_ANKLE_BALANCE: float = 1.5   # rad ankle correction per rad pelvis pitch
+_IDX_ANKLE_L: int = 4           # index of left_ankle_pitch in Q_CROUCH
+_IDX_ANKLE_R: int = 10          # index of right_ankle_pitch in Q_CROUCH
+
 # Simulation duration for the acceptance test
-_SIM_DURATION_S: float = 12.0
+_SIM_DURATION_S: float = 100.0
+
+# Warmup steps: run 500 steps (1 s at 500 Hz) before starting the timer so
+# contact forces can settle before the official stability measurement begins.
+_WARMUP_STEPS: int = 500
 
 # Viewer sync rate: sync every N physics steps (avoids ~500 Hz OpenGL calls)
 _VIEWER_SYNC_EVERY: int = 5
@@ -164,7 +174,6 @@ def _set_crouch_initial_state(env: MujocoEnv, foot_geom_idx: list[int]) -> None:
     """
     mujoco.mj_resetData(env.model, env.data)
 
-    # Write joint angles directly into the actuated qpos range.
     # qpos[0:7] is the floating base (position + quaternion) — left untouched here.
     # qpos[7:36] maps one-to-one onto the 29 actuators (all 1-DOF revolute joints).
     env.data.qpos[7:36] = Q_CROUCH
@@ -190,7 +199,6 @@ def main() -> None:
     foot_geom_idx = _locate_foot_spheres(env.model)
     Logger.debug(f"Found {len(foot_geom_idx)} foot sphere geoms: {foot_geom_idx}")
 
-    # Instantiate the optimised controller
     controller = JointPDController(
         model=env.model,
         data=env.data,
@@ -199,11 +207,12 @@ def main() -> None:
         log_interval=500,   # disk-log at ~1 Hz (500 Hz sim rate)
     )
 
-    # Instantiate estimator for final CoM stability check
     estimator = StateEstimator(env.model, env.data)
 
-    # Pre-allocate the zero-velocity reference (passed by reference every step)
     qdot_zero = np.zeros(env.model.nu, dtype=np.float64)
+
+    # Pre-allocated mutable reference to avoid per-step np.copy
+    q_ref_live = Q_CROUCH.copy()
 
     Logger.info("Setting initial crouched state...")
     _set_crouch_initial_state(env, foot_geom_idx)
@@ -215,40 +224,65 @@ def main() -> None:
         f"sim_dt={env.model.opt.timestep*1000:.1f} ms"
     )
 
-    # ── Main simulation loop ────────────────────────────────────────────────────
+    # ── Warmup phase ────────────────────────────────────────────────────────────
+    # Run _WARMUP_STEPS physics steps before the official timer so contact
+    # forces and gravity compensation converge before stability is judged.
+    Logger.info(f"Warmup: {_WARMUP_STEPS} steps ...")
+    for _ in range(_WARMUP_STEPS):
+        env.data.ctrl[:] = controller.compute_torques(Q_CROUCH, qdot_zero)
+        env.step()
+        if env.viewer.is_running() and _ % _VIEWER_SYNC_EVERY == 0:
+            env.sync_viewer()
+    env.data.time = 0.0   # reset clock — official timer starts now
+
+    # ── Main simulation loop ─────────────────────────────────────────────────────
     Logger.info(f"Running crouched stance for {_SIM_DURATION_S:.0f} s ...")
 
-    step         = 0
-    log_every    = 500              # status log interval (steps)
-    real_t0      = time.perf_counter()
+    step      = 0
+    log_every = 500
+    real_t0   = time.perf_counter()
 
     while env.viewer.is_running() and env.data.time < _SIM_DURATION_S:
         step_wall_start = time.perf_counter()
 
-        # ── Control ──────────────────────────────────────────────────────────
-        # compute_torques returns a VIEW of controller._tau.
-        # Copy it into data.ctrl immediately before the next call can overwrite it.
-        env.data.ctrl[:] = controller.compute_torques(Q_CROUCH, qdot_zero)
+        # ── Pelvis-pitch balance feedback ─────────────────────────────────────
+        # Extract pelvis pitch from the floating-base quaternion (qpos[3:7]).
+        # Rotation about the Y axis (pitch): arcsin(2*(qw*qy - qz*qx)).
+        # A positive pelvis pitch means the torso has tipped forward; we
+        # increase the ankle pitch target (more dorsiflexion) to push it back.
+        q_ref_live[:] = Q_CROUCH
+        _qw = env.data.qpos[3]
+        _qx = env.data.qpos[4]
+        _qy = env.data.qpos[5]
+        _qz = env.data.qpos[6]
+        _t = max(-1.0, min(1.0, 2.0 * (_qw * _qy - _qz * _qx)))
+        _pelvis_pitch = math.asin(_t)
+        q_ref_live[_IDX_ANKLE_L] += _K_ANKLE_BALANCE * _pelvis_pitch
+        q_ref_live[_IDX_ANKLE_R] += _K_ANKLE_BALANCE * _pelvis_pitch
 
-        # ── Physics step ─────────────────────────────────────────────────────
+        # ── Control ───────────────────────────────────────────────────────────
+        env.data.ctrl[:] = controller.compute_torques(q_ref_live, qdot_zero)
+
+        # ── Physics step ──────────────────────────────────────────────────────
         env.step()
 
-        # ── Viewer sync (sub-sampled to cap OpenGL overhead) ─────────────────
+        # ── Viewer sync (sub-sampled to cap OpenGL overhead) ──────────────────
         if step % _VIEWER_SYNC_EVERY == 0:
             env.sync_viewer()
 
-        # ── Periodic terminal status ──────────────────────────────────────────
+        # ── Periodic terminal status ───────────────────────────────────────────
         if step % log_every == 0 and step > 0:
-            com   = estimator.get_com()
+            com    = estimator.get_com()
             stable = estimator.is_com_stable()
             Logger.debug(
                 f"t={env.data.time:.2f}s  "
                 f"CoM_z={com[2]:.4f}m  "
                 f"pelvis_z={env.data.qpos[2]:.4f}m  "
+                f"pitch={math.degrees(_pelvis_pitch):+.2f}°  "
                 f"stable={'YES' if stable else 'NO '}"
             )
 
-        # ── Real-time pacing ──────────────────────────────────────────────────
+        # ── Real-time pacing ───────────────────────────────────────────────────
         elapsed_wall = time.perf_counter() - step_wall_start
         remaining    = env.model.opt.timestep - elapsed_wall
         if remaining > 0:
@@ -256,7 +290,7 @@ def main() -> None:
 
         step += 1
 
-    # ── Final acceptance criteria report ───────────────────────────────────────
+    # ── Final acceptance criteria report ────────────────────────────────────────
     Logger.info("─" * 60)
     Logger.info("Stance Verification Results:")
 
@@ -276,13 +310,9 @@ def main() -> None:
 
     stable = estimator.is_com_stable()
     if stable:
-        Logger.info(
-            f"  [PASS] CoM ground projection is INSIDE the support polygon"
-        )
+        Logger.info("  [PASS] CoM ground projection is INSIDE the support polygon")
     else:
-        Logger.error(
-            f"  [FAIL] CoM ground projection is OUTSIDE the support polygon"
-        )
+        Logger.error("  [FAIL] CoM ground projection is OUTSIDE the support polygon")
 
     real_elapsed = time.perf_counter() - real_t0
     Logger.info(
