@@ -8,7 +8,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from src.utils.config_parser import SimConfig
 from src.env.mujoco_env import MujocoEnv
 from src.estimators.state_estimator import StateEstimator
-from utils.logger.terminal_logger import TerminalLogger as Logger
+from src.utils.logger.terminal_logger import TerminalLogger as Logger
 
 
 
