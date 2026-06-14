@@ -139,10 +139,10 @@ class JointPDController:
         np.multiply(self._kd, self._err_qdot, out=self._err_qdot)
         np.add(self._tau, self._err_qdot, out=self._tau)
 
-        # 3. CRITICAL: Gather gravity compensation terms from qfrc_bias (dof space)
-        # Re-use _err_qdot buffer to preserve memory overhead rules
-        np.take(self.data.qfrc_bias, self._dof_idx, out=self._err_qdot)
-        np.add(self._tau, self._err_qdot, out=self._tau)
+        # 3. Feedforward gravity compensation (optional)
+        if self._gravity_comp:
+            np.take(self.data.qfrc_bias, self._dof_idx, out=self._err_qdot)
+            np.add(self._tau, self._err_qdot, out=self._tau)
 
         # 4. Enforce motor saturation bounds
         np.clip(self._tau, self._ctrl_min, self._ctrl_max, out=self._tau)

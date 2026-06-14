@@ -323,9 +323,10 @@ def main() -> None:
         _qz = env.data.qpos[6]
         _t = max(-1.0, min(1.0, 2.0 * (_qw * _qy - _qz * _qx)))
         _pelvis_pitch = math.asin(_t)
-        # Corrected negative feedback implementation
-        q_ref_live[_IDX_ANKLE_L] -= _K_ANKLE_BALANCE * _pelvis_pitch
-        q_ref_live[_IDX_ANKLE_R] -= _K_ANKLE_BALANCE * _pelvis_pitch
+        # When pelvis tips forward (pitch > 0), increase plantarflexion
+        # (more positive ankle_pitch) to push CoM backward.
+        q_ref_live[_IDX_ANKLE_L] += _K_ANKLE_BALANCE * _pelvis_pitch
+        q_ref_live[_IDX_ANKLE_R] += _K_ANKLE_BALANCE * _pelvis_pitch
 
         # ── Control ───────────────────────────────────────────────────────────
         env.data.ctrl[:] = controller.compute_torques(q_ref_live, qdot_zero)
