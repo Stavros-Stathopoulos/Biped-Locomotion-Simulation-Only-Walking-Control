@@ -29,8 +29,16 @@ class MujocoEnv:
         self.model.opt.gravity[:] = config.gravity
 
         if config.override_damping:
-            self.model.dof_damping[:] = config.default_damping
-            Logger.debug(f"Joint damping overridden to {config.default_damping} for all DOFs.")
+            # Apply only to actuated-joint DOFs; the floating-base free joint
+            # (DOFs 0–5: pelvis XYZ + RPY) retains its XML-defined damping so
+            # the pelvis is not artificially anchored in space.
+            actuated_dof_adr = self.model.jnt_dofadr[self.model.actuator_trnid[:, 0]]
+            self.model.dof_damping[actuated_dof_adr] = config.default_damping
+            Logger.debug(
+                f"Joint damping set to {config.default_damping} Nm·s/rad "
+                f"on {len(actuated_dof_adr)} actuated DOFs "
+                "(floating-base DOFs 0–5 excluded)."
+            )
 
         self.viewer = None
 

@@ -2,9 +2,25 @@ environment:
   scene_xml_path: ../assets/unitree_g1/scene.xml
 
 timing:
+  # 500 Hz gives dt = 2 ms.  With max Kp=200 Nm/rad and I_eff≈1.5 kg·m²:
+  #   ω_n = sqrt(200/1.5) ≈ 11.5 rad/s  →  dt_critical = 2/ω_n ≈ 0.17 s >> 2 ms  (stable)
   sim_frequency_hz: 500
 
 physics:
   gravity: [0, 0, -9.81]
+  # Applies passive viscous damping to the 29 actuated joints ONLY.
+  # The floating-base free joint (pelvis DOFs 0-5) is intentionally excluded
+  # in MujocoEnv to prevent artificial anchoring of the pelvis.
   override_joint_damping: true
-  default_damping: 15.0
+  default_damping: 15.0  # Nm·s/rad for all actuated revolute joints
+
+# Controller gains are defined as a ControllerConfig dataclass in
+# scripts/verify_stance.py.  The configuration below is for reference only.
+#
+# controller:
+#   gravity_comp: true        # τ_ff = qfrc_bias[dof_idx] (gravity + Coriolis)
+#   nan_check: true           # raise RuntimeError on NaN output
+#   log_interval: 500         # disk-log every N steps (~1 Hz at 500 Hz)
+#   # Proportional gains (Nm/rad) — see verify_stance.py CTRL_CFG for full arrays
+#   # Ankle Kp=150 satisfies marginal stability: 2*150 > 35*9.81*0.66 ≈ 226 Nm/rad
+#   # Derivative gains (Nm·s/rad) — total damping = Kd + dof_damping = 8+15 = 23
