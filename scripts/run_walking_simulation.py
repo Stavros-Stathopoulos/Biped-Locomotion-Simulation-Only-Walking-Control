@@ -37,7 +37,7 @@ _AP = -0.50   # Ankle Pitch (rad)
 Q_CROUCH: np.ndarray = np.array([
     _HP,   0.0,   0.0,  _KN,  _AP,   0.0,  # Left Leg
     _HP,   0.0,   0.0,  _KN,  _AP,   0.0,  # Right Leg
-     0.0,  0.0,   0.0,                     # Waist
+     0.0,  0.0,   0.3,                     # Waist
      0.30,  0.30,  0.0,  0.50,  0.0,  0.0,  0.0, # Left Arm
      0.30, -0.30,  0.0,  0.50,  0.0,  0.0,  0.0, # Right Arm
 ], dtype=np.float64)
