@@ -13,7 +13,7 @@
     <texture type="skybox" builtin="flat" rgb1="0 0 0" rgb2="0 0 0" width="512" height="3072"/>
     <!-- Procedural grid texture for spatial reference during walking -->
     <texture type="2d" name="grid" builtin="checker" rgb1="0.1 0.2 0.3" rgb2="0.2 0.3 0.4" width="300" height="300" mark="edge" markrgb="0.2 0.3 0.4"/>
-    <material name="grid" texture="grid" texrepeat="2 2" texuniform="true" reflectance="0.2"/>
+    <material name="grid" texture="grid" texrepeat="8 8" texuniform="false" reflectance="0.2"/>
   </asset>
 
   <worldbody>

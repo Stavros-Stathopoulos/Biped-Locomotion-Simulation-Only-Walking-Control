@@ -135,7 +135,7 @@ def main() -> None:
         state_estimator= estimator,
         low_level_pd   = pd_controller,
         step_duration  = 0.4,
-        nominal_width  = 0.2,
+        nominal_width  = 0.10,
     )
 
     Logger.info("Setting crouched initial state ...")

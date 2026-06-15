@@ -59,12 +59,6 @@ class MujocoEnv:
         """Launches the native interactive visualizer thread."""
         if self.viewer is None:
             self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
-            
-            # Force the viewer to use our tracking camera instead of the free camera
-            cam_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, "track_com_cam")
-            if cam_id != -1:
-                self.viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
-                self.viewer.cam.fixedcamid = cam_id
 
     def sync_viewer(self):
         """Synchronizes current data state to visualizer."""

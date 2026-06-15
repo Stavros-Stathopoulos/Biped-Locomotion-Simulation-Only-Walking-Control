@@ -42,23 +42,32 @@ Q_CROUCH: np.ndarray = np.array([
      0.30, -0.30,  0.0,  0.50,  0.0,  0.0,  0.0, # Right Arm
 ], dtype=np.float64)
 
+# Gains identical to the verified verify_stance.py CTRL_CFG.
+# The prior values (Kp_hip=400, Kp_knee=450) were 2-3× too high, amplifying
+# any residual IK error into oscillating torques that destabilised the stance.
 KP: np.ndarray = np.array([
-    400.0, 200.0, 150.0, 450.0, 250.0, 100.0,  # Left Leg
-    400.0, 200.0, 150.0, 450.0, 250.0, 100.0,  # Right Leg
-    200.0, 150.0, 200.0,                       # Waist
-     80.0,  80.0,  50.0,  80.0,  40.0,  20.0, 20.0, # Left Arm
-     80.0,  80.0,  50.0,  80.0,  40.0,  20.0, 20.0, # Right Arm
+    150.0, 100.0,  80.0, 200.0, 150.0,  60.0,  # Left Leg
+    150.0, 100.0,  80.0, 200.0, 150.0,  60.0,  # Right Leg
+    100.0,  80.0, 100.0,                        # Waist
+     50.0,  50.0,  30.0,  50.0,  25.0,  12.0, 12.0,  # Left Arm
+     50.0,  50.0,  30.0,  50.0,  25.0,  12.0, 12.0,  # Right Arm
 ], dtype=np.float64)
 
 KD: np.ndarray = np.array([
-    15.0,  8.0,  6.0, 18.0, 20.0,  5.0,  # Left Leg
-    15.0,  8.0,  6.0, 18.0, 20.0,  5.0,  # Right Leg
-     8.0,  6.0,  8.0,                    # Waist
-     3.0,  3.0,  2.0,  3.0,  1.5,  0.8,  0.8, # Left Arm
-     3.0,  3.0,  2.0,  3.0,  1.5,  0.8,  0.8, # Right Arm
+     8.0,  5.0,  4.0, 10.0,  8.0,  3.0,  # Left Leg
+     8.0,  5.0,  4.0, 10.0,  8.0,  3.0,  # Right Leg
+     5.0,  4.0,  5.0,                    # Waist
+     2.0,  2.0,  1.5,  2.0,  1.0,  0.5,  0.5,  # Left Arm
+     2.0,  2.0,  1.5,  2.0,  1.0,  0.5,  0.5,  # Right Arm
 ], dtype=np.float64)
 
-_WARMUP_STEPS: int = 500
+# Ankle balance correction during warmup (identical to verify_stance.py).
+# Prevents the free pelvis from tipping backward before the IK loop engages.
+_K_ANKLE_BALANCE: float = 1.5
+_IDX_ANKLE_L: int = 4
+_IDX_ANKLE_R: int = 10
+
+_WARMUP_STEPS: int = 1000   # 2 s at 500 Hz — gives contact forces time to settle
 _VIEWER_SYNC_EVERY: int = 5
 _FOOT_SPHERE_TARGET_Z: float = 0.006
 
@@ -67,13 +76,23 @@ def _locate_foot_spheres(model: mujoco.MjModel) -> list[int]:
     return [i for i in range(model.ngeom) if abs(model.geom_size[i, 0] - 0.005) < 1e-6]
 
 def _set_crouch_initial_state(env: MujocoEnv, foot_geom_idx: list[int]) -> None:
-    """Enforces stable baseline kinematic foot positioning to anchor height initialization."""
+    """Reset to crouched stance with correct floor contact height and CoM X centering."""
     mujoco.mj_resetData(env.model, env.data)
     env.data.qpos[7:36] = Q_CROUCH
     mujoco.mj_forward(env.model, env.data)
 
+    # Pelvis Z: lower until the lowest foot sphere just touches the floor.
     min_sphere_z = min(env.data.geom_xpos[i, 2] for i in foot_geom_idx)
     env.data.qpos[2] += _FOOT_SPHERE_TARGET_Z - min_sphere_z
+    mujoco.mj_forward(env.model, env.data)
+
+    # Pelvis X: translate so whole-body CoM is directly above the foot mid-point.
+    # The crouched pose leaves the CoM ~35 mm behind the foot centroid; without
+    # this correction the free pelvis immediately tips backward once gravity acts.
+    pelvis_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_BODY, "pelvis")
+    com_x  = env.data.subtree_com[pelvis_id, 0]
+    foot_x = float(np.mean([env.data.geom_xpos[i, 0] for i in foot_geom_idx]))
+    env.data.qpos[0] += foot_x - com_x
     mujoco.mj_forward(env.model, env.data)
 
 def main() -> None:
@@ -101,26 +120,40 @@ def main() -> None:
         data=env.data,
         state_estimator=estimator,
         low_level_pd=low_level_pd,
-        step_duration=0.35,   # Parameterized stride timing configuration
-        nominal_width=0.18    # Normalized operational tracking stance width
+        step_duration=0.40,
+        # nominal_width is the Y offset added to left_hip_pitch_link to reach the
+        # natural ankle position.  left_hip_pitch_link is at Y≈+0.064 m from pelvis;
+        # the ankle is at Y≈+0.118 m, so the offset is ≈0.054 m → width ≈0.108 m.
+        # The prior value (0.18) placed each swing foot ~38 mm too wide, causing
+        # progressive lateral splay and a lateral fall.
+        nominal_width=0.10,
     )
 
     # Pre-allocate velocity command vectors to eliminate heap changes inside the loop
     v_des_live = np.zeros(2, dtype=np.float64)
+    q_ref_warmup = Q_CROUCH.copy()   # mutable copy for ankle balance correction
 
     # 3. Establish Stable Geometric Footprint Before Loop Starts
     Logger.info("Aligning contact constraints...")
     _set_crouch_initial_state(env, foot_geom_idx)
 
-    # 4. Execute Rigid Zero-Velocity Warmup Phase
+    # 4. Execute Warmup Phase with pelvis-pitch balance feedback.
+    # Mirrors verify_stance.py: prevents the free pelvis from tipping before IK engages.
     Logger.info(f"Executing {_WARMUP_STEPS} steps of stand-still initialization...")
     qdot_zero = np.zeros(env.model.nu, dtype=np.float64)
     for _ in range(_WARMUP_STEPS):
-        env.data.ctrl[:] = low_level_pd.compute_torques(Q_CROUCH, qdot_zero)
+        q_ref_warmup[:] = Q_CROUCH
+        _qw, _qx, _qy, _qz = (env.data.qpos[3], env.data.qpos[4],
+                                env.data.qpos[5], env.data.qpos[6])
+        _t = max(-1.0, min(1.0, 2.0 * (_qw * _qy - _qz * _qx)))
+        _pelvis_pitch = math.asin(_t)
+        q_ref_warmup[_IDX_ANKLE_L] += _K_ANKLE_BALANCE * _pelvis_pitch
+        q_ref_warmup[_IDX_ANKLE_R] += _K_ANKLE_BALANCE * _pelvis_pitch
+        env.data.ctrl[:] = low_level_pd.compute_torques(q_ref_warmup, qdot_zero)
         env.step()
         if env.viewer.is_running() and _ % _VIEWER_SYNC_EVERY == 0:
             env.sync_viewer()
-            
+
     # Reset master clock frame boundaries for accurate tracking initialization
     env.data.time = 0.0
     Logger.info("Locomotion loop engaged. Executing tracking test profile...")
