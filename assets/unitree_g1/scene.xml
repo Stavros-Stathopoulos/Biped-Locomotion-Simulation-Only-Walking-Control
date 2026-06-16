@@ -25,4 +25,17 @@
     <!-- The tracking camera -->
     <camera name="track_com_cam" mode="trackcom" pos="0 -3 0.5" xyaxes="1 0 0 0 0 1"/>
   </worldbody>
+
+  <!-- Verified crouched stance: hp=-0.50, kn=1.00, ap=-0.50, arms tucked.
+       Pelvis Z (0.793) is the default; fine-tuned at runtime to place foot
+       spheres at z≈0.006 m and centre the CoM above the support polygon. -->
+  <keyframe>
+    <key name="walk_pose" qpos="
+      0.0  0.0  0.793  1 0 0 0
+     -0.50  0.0  0.0  1.00 -0.50  0.0
+     -0.50  0.0  0.0  1.00 -0.50  0.0
+      0.0   0.0  0.3
+      0.30  0.30  0.0  0.50  0.0  0.0  0.0
+      0.30 -0.30  0.0  0.50  0.0  0.0  0.0"/>
+  </keyframe>
 </mujoco>

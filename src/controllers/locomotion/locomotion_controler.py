@@ -59,7 +59,7 @@ class BipedLocomotionController:
         self.swing_gen  = SwingFootTrajectoryGenerator(
             swing_duration = step_duration * 0.9,
         )
-        self.com_planner = AnalyticalComPlanner(com_height=com_height)
+        self.com_planner = AnalyticalComPlanner(com_height=com_height, step_duration=step_duration)
 
         # ── One-time initialisation flag ───────────────────────────────────────
         self._is_initialized = False
@@ -133,23 +133,24 @@ class BipedLocomotionController:
             np.copyto(self._p_stance_r, self.data.xpos[self._r_foot_id])
             np.copyto(self._p_start_l,  self.data.xpos[self._l_foot_id])
             np.copyto(self._p_start_r,  self.data.xpos[self._r_foot_id])
-            # Seed LIPM from current measured state; ZMP = foot midpoint
-            com   = self.estimator.get_com()
-            mid_x = 0.5 * (self._p_stance_l[0] + self._p_stance_r[0])
-            mid_y = 0.5 * (self._p_stance_l[1] + self._p_stance_r[1])
-            self._err_com[0] = mid_x   # borrow as ZMP proxy; overwritten before IK
-            self._err_com[1] = mid_y
-            self.com_planner.latch_step(
-                initial_com_xy     = com,
-                initial_com_vel_xy = self.data.qvel,
-                stance_foot_xy     = self._err_com,
-            )
+            # Bootstrap: seed com_pos_ref / com_vel_ref from measured state so
+            # that the very first start_new_step() (fired by the scheduler on
+            # step 0) reads valid p0/v0 boundary conditions.  All subsequent
+            # calls to start_new_step() automatically latch from the previous
+            # reference output — never from sensors again.
+            com = self.estimator.get_com()
+            self.com_planner.com_pos_ref[0] = com[0]
+            self.com_planner.com_pos_ref[1] = com[1]
+            self.com_planner.com_pos_ref[2] = self.com_planner.z_c
+            self.com_planner.com_vel_ref[0] = self.data.qvel[0]
+            self.com_planner.com_vel_ref[1] = self.data.qvel[1]
+            self.com_planner.com_vel_ref[2] = 0.0
             self._is_initialized = True
 
         # ── Gait clock ────────────────────────────────────────────────────────
         self.scheduler.update(self.data.time)
 
-        # ── Step-transition edge: latch anchors, plan footstep, seed LIPM ─────
+        # ── Step-transition edge: latch anchors, plan footstep, seed spline ─────
         if self.scheduler.new_step_triggered:
             if self.scheduler.current_step_index % 2 == 0:
                 # Left foot becomes stance; right foot will swing.
@@ -161,10 +162,11 @@ class BipedLocomotionController:
                     body_vel     = self.data.qvel,
                     body_vel_des = v_des,
                 )
-                self.com_planner.latch_step(
-                    initial_com_xy     = self.estimator.get_com(),
-                    initial_com_vel_xy = self.data.qvel,
-                    stance_foot_xy     = self._p_stance_l,
+                # C1-continuous seeding: p0/v0 come from the previous reference
+                # output stored in com_planner — NOT from the live estimator.
+                self.com_planner.start_new_step(
+                    stance_foot_xy = self._p_stance_l,
+                    v_des          = v_des,
                 )
             else:
                 # Right foot becomes stance; left foot will swing.
@@ -176,16 +178,18 @@ class BipedLocomotionController:
                     body_vel     = self.data.qvel,
                     body_vel_des = v_des,
                 )
-                self.com_planner.latch_step(
-                    initial_com_xy     = self.estimator.get_com(),
-                    initial_com_vel_xy = self.data.qvel,
-                    stance_foot_xy     = self._p_stance_r,
+                self.com_planner.start_new_step(
+                    stance_foot_xy = self._p_stance_r,
+                    v_des          = v_des,
                 )
 
-        # ── LIPM reference update ──────────────────────────────────────────────
-        # τ = time elapsed within the current step [0, T_step)
+        # ── Hermite reference update ───────────────────────────────────────────
+        # φ = normalised step phase ∈ [0, 1).  Using fmod avoids accumulation
+        # drift; dividing by step_duration converts to the [0,1] domain that
+        # compute_reference() expects.
         tau = math.fmod(self.data.time, self._step_duration)
-        self.com_planner.update(tau)
+        phi = tau / self._step_duration
+        self.com_planner.compute_reference(phi)
 
         # ── Foot reference resolution ──────────────────────────────────────────
         if self.scheduler.contact_states[0] == 0:       # Left foot: SWING

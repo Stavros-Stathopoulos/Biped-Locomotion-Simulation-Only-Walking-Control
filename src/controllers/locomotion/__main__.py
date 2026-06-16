@@ -34,6 +34,7 @@ from src.controllers.joint_pd_controller import ControllerConfig, JointPDControl
 from src.estimators.state_estimator import StateEstimator
 from src.utils.logger.terminal_logger import TerminalLogger as Logger
 from src.controllers.locomotion.locomotion_controler import BipedLocomotionController
+from src.controllers.fall_recovery_controller import FallRecoveryController
 
 
 # ── Desired walking velocity ───────────────────────────────────────────────────
@@ -137,6 +138,7 @@ def main() -> None:
         step_duration  = 0.4,
         nominal_width  = 0.10,
     )
+    recovery = FallRecoveryController(env.model, env.data)
 
     Logger.info("Setting crouched initial state ...")
     _set_crouch_state(env, foot_geom_idx)
@@ -148,7 +150,8 @@ def main() -> None:
     # ── Warmup: let contact forces and gravity comp settle ─────────────────────
     Logger.info("Warmup (500 steps) ...")
     for _ in range(500):
-        env.data.ctrl[:] = loco.advance_control(_V_DES)
+        torques = loco.advance_control(_V_DES)
+        env.data.ctrl[:] = recovery.process(torques)
         env.step()
         if env.viewer.is_running() and _ % _VIEWER_SYNC_EVERY == 0:
             env.sync_viewer()
@@ -181,7 +184,8 @@ def main() -> None:
 
         wall_start = time.perf_counter()
 
-        env.data.ctrl[:] = loco.advance_control(_V_DES)
+        torques = loco.advance_control(_V_DES)
+        env.data.ctrl[:] = recovery.process(torques)
         env.step()
 
         if step % _VIEWER_SYNC_EVERY == 0:
@@ -189,6 +193,12 @@ def main() -> None:
 
         if step % _LOG_EVERY == 0 and step > 0:
             _log_gait_state(loco, step)
+            Logger.debug(
+                f"  fall={recovery.fall_state.name} "
+                f"pitch={math.degrees(recovery.pitch):+.1f}° "
+                f"roll={math.degrees(recovery.roll):+.1f}° "
+                f"CoM_z={recovery.com_height:.3f}m"
+            )
 
         elapsed = time.perf_counter() - wall_start
         remaining = env.model.opt.timestep - elapsed
