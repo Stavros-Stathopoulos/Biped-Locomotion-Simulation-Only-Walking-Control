@@ -19,28 +19,41 @@ Implements a joint-space PD controller with gravity and Coriolis compensation.
 ### Control Law
 
 ```
-τ = kp * (q_ref - q) + kd * (qdot_ref - qdot) + τ_bias
+τ = τ_ff + Kp·(q_ref − q) + Kd·(q̇_ref − q̇)
 ```
 
 - `q`, `qdot` — current joint positions and velocities, extracted from `data.qpos` and `data.qvel`
 - `q_ref`, `qdot_ref` — reference joint positions and velocities
-- `τ_bias` — gravity and Coriolis forces from `data.qfrc_bias`
-- `kp`, `kd` — proportional and derivative gain arrays, shape `(nu,)`
+- `τ_ff` — feedforward term: `data.qfrc_bias[dof_idx]` when `gravity_comp=True` (gravity + Coriolis at near-zero velocity = pure gravity compensation); zero otherwise
+- `Kp`, `Kd` — proportional and derivative gain arrays, shape `(nu,)`, defined in `ControllerConfig`
+
+### Configuration
+
+```python
+from src.controllers.joint_pd_controller import ControllerConfig
+
+cfg = ControllerConfig(
+    kp=np.full(nu, 100.0),   # Nm/rad
+    kd=np.full(nu, 10.0),    # Nm·s/rad
+    gravity_comp=True,        # adds τ_ff = qfrc_bias[dof_idx]
+    nan_check=True,           # raises RuntimeError on NaN output
+    log_interval=500,         # disk-log every N steps
+)
+```
 
 ### Constructor
 
 ```python
-JointPDController(model, data, kp: np.ndarray, kd: np.ndarray)
+JointPDController(model, data, cfg: ControllerConfig)
 ```
 
 | Parameter | Type | Description |
-|-----------|------|-------------|
+| --------- | ---- | ----------- |
 | `model` | `mujoco.MjModel` | Model from the active `MujocoEnv` |
 | `data` | `mujoco.MjData` | Data from the active `MujocoEnv` |
-| `kp` | `np.ndarray` shape `(nu,)` | Proportional gains per actuator |
-| `kd` | `np.ndarray` shape `(nu,)` | Derivative gains per actuator |
+| `cfg` | `ControllerConfig` | Gain bundle and feature flags |
 
-`nu = model.nu` — number of actuated motors (floating-base DOFs are excluded).
+`nu = model.nu` — number of actuated motors (floating-base DOFs are excluded automatically via `jnt_dofadr`).
 
 ### Method: `compute_torques`
 
@@ -53,35 +66,34 @@ Returns torques of shape `(nu,)` ready to assign to `data.ctrl`.
 **Joint-to-actuator index mapping** (handles non-contiguous MuJoCo addressing):
 
 | MuJoCo field | Used for |
-|---|---|
+| --- | --- |
 | `model.actuator_trnid[i, 0]` | Joint index for actuator `i` |
 | `model.jnt_qposadr[joint_id]` | Index into `data.qpos` |
 | `model.jnt_dofadr[joint_id]` | Index into `data.qvel` and `data.qfrc_bias` |
-
-Each call logs the computed PD torques and gravity/Coriolis torques via `DataLogger`.
 
 ### Example
 
 ```python
 import numpy as np
 from src.env.mujoco_env import MujocoEnv
-from src.controllers.joint_pd_controller import JointPDController
-import os
+from src.controllers.joint_pd_controller import ControllerConfig, JointPDController
+from src.utils.config_parser import SimConfig
 
-env = MujocoEnv(os.path.abspath("assets/unitree_g1/scene.xml"), rate_hz=500.0)
-env.reset(keystring="stand")
+config = SimConfig("config/simulation.yaml")
+env = MujocoEnv(config)
 
 nu = env.model.nu
-kp = np.full(nu, 100.0)
-kd = np.full(nu, 10.0)
+cfg = ControllerConfig(
+    kp=np.full(nu, 100.0),
+    kd=np.full(nu, 10.0),
+    gravity_comp=True,
+)
+controller = JointPDController(env.model, env.data, cfg)
 
-controller = JointPDController(env.model, env.data, kp, kd)
-
-q_ref = env.data.qpos[7:7 + nu].copy()  # hold current pose
+q_ref    = env.data.qpos[7:7 + nu].copy()
 qdot_ref = np.zeros(nu)
 
 while True:
-    tau = controller.compute_torques(q_ref, qdot_ref)
-    env.data.ctrl[:] = tau
+    env.data.ctrl[:] = controller.compute_torques(q_ref, qdot_ref)
     env.step()
 ```

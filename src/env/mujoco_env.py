@@ -29,8 +29,16 @@ class MujocoEnv:
         self.model.opt.gravity[:] = config.gravity
 
         if config.override_damping:
-            self.model.dof_damping[:] = config.default_damping
-            Logger.debug(f"Joint damping overridden to {config.default_damping} for all DOFs.")
+            # Apply only to actuated-joint DOFs; the floating-base free joint
+            # (DOFs 0–5: pelvis XYZ + RPY) retains its XML-defined damping so
+            # the pelvis is not artificially anchored in space.
+            actuated_dof_adr = self.model.jnt_dofadr[self.model.actuator_trnid[:, 0]]
+            self.model.dof_damping[actuated_dof_adr] = config.default_damping
+            Logger.debug(
+                f"Joint damping set to {config.default_damping} Nm·s/rad "
+                f"on {len(actuated_dof_adr)} actuated DOFs "
+                "(floating-base DOFs 0–5 excluded)."
+            )
 
         self.viewer = None
 
@@ -51,12 +59,6 @@ class MujocoEnv:
         """Launches the native interactive visualizer thread."""
         if self.viewer is None:
             self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
-            
-            # Force the viewer to use our tracking camera instead of the free camera
-            cam_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, "track_com_cam")
-            if cam_id != -1:
-                self.viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
-                self.viewer.cam.fixedcamid = cam_id
 
     def sync_viewer(self):
         """Synchronizes current data state to visualizer."""

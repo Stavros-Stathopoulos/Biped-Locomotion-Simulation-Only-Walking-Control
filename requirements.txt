@@ -3,3 +3,4 @@ numpy==2.4.6
 PyYAML==6.0.3
 scipy>=1.11.0
 matplotlib>=3.7.0
+proxsuite
