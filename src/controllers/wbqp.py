@@ -121,7 +121,7 @@ class WholeBodyQP:
         qvel = data.qvel
 
         # dynamics terms (dense inertia matrix from the live state)
-        mujoco.mj_fullM(m, data, self._M)
+        mujoco.mj_fullM(m, self._M, data.qM)
         M = self._M
         h = data.qfrc_bias.copy()
 
