@@ -282,6 +282,19 @@
     <accelerometer name="imu-pelvis-linear-acceleration" site="imu_in_pelvis" noise="1e-2" cutoff="157"/>
   </sensor>
 
+  <!-- Bent-knee standing pose used as the controller home / initial condition.
+       qpos = [base(7)] + 29 joints in actuator order. Pelvis height places the
+       feet flat on the floor. (The controller also sets this pose in code via
+       RobotModel.set_home, which re-derives the height from forward kinematics.) -->
+  <keyframe>
+    <key name="stand"
+         qpos="0 0 0.7436 1 0 0 0
+               -0.40 0 0 0.80 -0.40 0
+               -0.40 0 0 0.80 -0.40 0
+               0 0 0
+               0.20 0.20 0 0.40 0 0 0
+               0.20 -0.20 0 0.40 0 0 0"/>
+  </keyframe>
 
   <!-- setup scene -->
   <statistic center="1.0 0.7 1.0" extent="0.8"/>
@@ -297,6 +310,6 @@
   </asset>
   <worldbody>
     <light pos="1 0 3.5" dir="0 0 -1" directional="true"/>
-    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane" group="2"/>
   </worldbody>
 </mujoco>

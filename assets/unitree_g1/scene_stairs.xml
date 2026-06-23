@@ -1,0 +1,27 @@
+<mujoco model="g1 scene with stairs">
+  <include file="g1_29dof.xml"/>
+
+  <statistic center="1.0 0.7 1.0" extent="0.8"/>
+
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.1 0.1 0.1" specular="0.9 0.9 0.9"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="-140" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="flat" rgb1="0 0 0" rgb2="0 0 0" width="512" height="3072"/>
+  </asset>
+
+  <worldbody>
+    <light pos="1 0 3.5" dir="0 0 -1" directional="true"/>
+
+    <!-- Staircase ahead of the robot (+x). Tagged render group 3 so the
+         controller's downward ray casts sense the tread heights and place each
+         foot on the surface it reaches. Risers 3 cm, treads 14 cm. -->
+    <geom name="stair1" type="box" group="2" pos="0.23 0 0.015" size="0.07 0.6 0.015" rgba="0.55 0.55 0.60 1"/>
+    <geom name="stair2" type="box" group="2" pos="0.37 0 0.030" size="0.07 0.6 0.030" rgba="0.50 0.50 0.55 1"/>
+    <geom name="stair3" type="box" group="2" pos="0.51 0 0.045" size="0.07 0.6 0.045" rgba="0.55 0.55 0.60 1"/>
+    <geom name="stair4" type="box" group="2" pos="0.65 0 0.060" size="0.07 0.6 0.060" rgba="0.50 0.50 0.55 1"/>
+  </worldbody>
+</mujoco>

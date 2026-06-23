@@ -1,6 +1,63 @@
 physics:
   gravity: [0, 0, -9.81]
-  solver_iterations: 50
-
-  override_joint_damping: true
+  solver_iterations: 100
+  # NOTE: the controller gains are tuned for the joint damping defined in the
+  # MJCF (20). These override fields are read but left disabled by default so the
+  # tuning stays valid; enable only if you re-tune the gains.
+  override_joint_damping: false
   default_damping: 15.0
+
+# Walking controller parameters. run_walking.py loads this file and passes these
+# straight to WalkingController(params=...). Keys map 1:1 to the controller, so
+# editing here actually changes behaviour. (--steps on the CLI overrides max_steps.)
+controller:
+  # The live whole-body inverse-dynamics QP is the active controller. It solves
+  # for all joint torques every tick from the robot's dynamics, contacts, friction
+  # and torque limits. Set use_wbqp: false to fall back to the IK+PD path.
+  use_wbqp: true
+
+  # Whole-body QP task gains/weights (acceleration-level PD per task).
+  wbqp:
+    kp_com: [60, 60, 90]
+    kd_com: [16, 16, 19]
+    kp_torso: 80
+    kp_swing: 300
+    w_com: 12
+    w_swing: 40
+    w_posture: 0.1
+    friction: 0.7
+
+  # Joint-space PD gains (only used if use_wbqp: false).
+  kp: {hip: 400, knee: 450, ankle: 220, waist_yaw: 350, waist: 350, shoulder: 80, elbow: 80, wrist: 30}
+  kd: {hip: 18,  knee: 20,  ankle: 11,  waist_yaw: 16,  waist: 16,  shoulder: 5,  elbow: 5,  wrist: 3}
+
+  # BalanceStabilizer (only used if use_wbqp: false).
+  balance:
+    kp_com_force: [400, 400]
+    kd_com_force: [120, 120]
+    kp_ori: [120, 120, 30]
+    kd_ori: [24, 24, 6]
+
+  # GaitController: FSM timing, footsteps, CoM balance feedback and safety.
+  # Timing is slower than the old IK+PD gait: the WBC shifts weight quasi-
+  # statically, so a slow weight shift + swing keeps it stable.
+  gait:
+    t_stand: 1.5          # initial settle (s)
+    t_shift: 2.2          # weight-shift duration (s)
+    step_duration: 1.0    # swing duration (s)
+    com_shift_frac: 0.9   # how far to shift the CoM toward the stance foot
+    t_land: 0.45          # double-support dwell after touchdown (s)
+    step_length: 0.03     # forward step (m); 0.0 = step in place
+    step_height: 0.05     # swing-foot lift (m)
+    stance_width: 0.237   # nominal lateral foot separation (m)
+    com_back_offset: 0.018 # CoM target behind foot centre (natural balance point)
+    kp_com: 1.6           # CoM balance feedback into the IK target (double support)
+    kd_com: 0.50          # CoM velocity damping
+    kp_com_swing: 1.6     # CoM hold gain in single support
+    max_steps: 20         # walk UP TO this many steps, then hold a stable stand
+    safe_step_tilt: 0.08  # stop walking + hold stand if residual torso tilt
+                          #   exceeds this before a step (prevents a fall by never
+                          #   attempting a step that would tip over the stance foot)
+    capture_margin: 0.02  # outward CoM excursion past the stance-foot centre that
+                          #   triggers an early balance-recovery abort
+    max_tilt: 0.30        # hard roll/pitch abort threshold (rad)

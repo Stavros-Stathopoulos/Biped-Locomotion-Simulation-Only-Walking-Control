@@ -35,8 +35,17 @@ class TerminalFormatter(logging.Formatter):
 def get_logger(name="robotics_logger"):
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
-    
+
     if not logger.handlers:
+        # The project path / messages may contain non-ASCII characters (e.g. a
+        # Greek "Ρομποτικά" folder). The default Windows console encoding is
+        # cp1252, which can't encode those and would raise UnicodeEncodeError
+        # inside logging. Force UTF-8 with errors='replace' so logging never
+        # crashes regardless of what characters appear in a path or message.
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass  # stream doesn't support reconfigure (e.g. already wrapped)
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.DEBUG)
         console_handler.setFormatter(TerminalFormatter())

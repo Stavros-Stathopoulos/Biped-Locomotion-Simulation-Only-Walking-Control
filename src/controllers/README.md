@@ -10,6 +10,39 @@ Joint-space and task-space control algorithms for the Unitree G1 humanoid.
 
 ---
 
+## Walking controller architecture
+
+`WalkingController` (`walking_controller.py`) orchestrates the full torque-only
+locomotion pipeline. One `update()` call returns the torque vector for
+`data.ctrl`; physics is advanced by `MujocoEnv.step()`. The robot is **never**
+pinned, welded, teleported, or stabilised by external forces, and `qpos`/`qvel`
+are never written during the run — only `set_home()` writes the initial pose.
+
+| File | Layer(s) | Role |
+|------|----------|------|
+| `robot_model.py` | 1 | `RobotModel` (index maps, torque limits, foot geometry, home pose) and `StateEstimator` (CoM + CoM velocity via `mj_jacSubtreeCom`, torso RPY, per-foot contact force, support phase). |
+| `gait.py` | 2-6, 10 | `GaitController`: FSM (`STAND / SHIFT_COM_* / *_SWING / *_LAND / RECOVER`), CoM planner with measured-CoM balance feedback, quintic swing-foot planner, footstep + Raibert/capture placement, balance-recovery abort. |
+| `wbik.py` | 7 | `WholeBodyIK`: weighted task-space (velocity) IK on a **private** `MjData` clone — CoM + both-foot + torso + posture tasks. Emits `q_des, qd_des`; never touches the sim. |
+| `joint_pd_controller.py` | 8, 9 | `JointPDController`: `tau = kp(q_ref-q) + kd(qd_ref-qd) + qfrc_bias`, clamped to actuator force limits. |
+| `balance.py` | 3, 10 | `BalanceStabilizer`: Jacobian-transpose CoM-force + pelvis-attitude assist. |
+
+### Key design decisions (learned from tuning)
+
+- **Gravity compensation needs stiff legs.** `qfrc_bias` only approximates the
+  static hold for a floating base; the residual is carried by joint stiffness, so
+  leg gains are high (hip 400 / knee 450 / ankle 220).
+- **The IK is a clean kinematic plan** (its base floats freely, seeded from home).
+  Feeding the measured tilting base back into the IK destabilises it — disturbance
+  rejection is done elsewhere.
+- **Active balance is injected into the IK CoM target** from the *measured* CoM
+  error/velocity. Because the stiff PD faithfully tracks the IK reference, moving
+  that target moves the robot — this is the primary balance loop.
+- **Lift-off is gated on a settled CoM**; the swing foot presses slightly into
+  the floor and the FSM waits for confirmed double-support contact before
+  recentring, so single support is entered/exited with low momentum.
+
+---
+
 ## JointPDController
 
 `src/controllers/joint_pd_controller.py`
