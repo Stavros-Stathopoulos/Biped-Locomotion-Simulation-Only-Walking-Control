@@ -1,5 +1,5 @@
-Biped Locomotion Challenge – Simu-
-lation - Only Walking Control
+# Biped Locomotion Challenge – Simulation - Only Walking Control
+
 Robot: Unitree Robotics G1 humanoid robot or Pal Robotics Talos humanoid
 robot
 Deployment: MuJoCo simulation environment
