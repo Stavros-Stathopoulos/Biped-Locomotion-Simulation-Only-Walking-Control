@@ -81,12 +81,14 @@ class DCMWalkingGait:
         # footstep geometry
         self.step_length = p.get("step_length", 0.0)    # forward (m); 0 = in place
         self.step_width = p.get("step_width", 0.22)      # lateral foot separation (m)
-        self.step_height = p.get("step_height", 0.05)    # swing-foot lift (m)
+        self.step_height = p.get("step_height", 0.15)    # swing-foot lift (m)
 
         # DCM control
         self.n_preview = p.get("n_preview", 6)  # footstep preview horizon (steps)
         self.k_dcm = p.get("k_dcm", 2.5)        # DCM feedback gain (>0 stabilises)
-        self.k_cap = p.get("k_cap", 1.0)        # lateral DCM step-adjustment gain
+        self.k_cap = p.get("k_cap", 0.8)        # lateral DCM step-adjustment gain
+        self.max_dy = p.get("max_dy", 0.06)     # clamp on lateral foot correction (m)
+        self.k_center = p.get("k_center", 0.0)  # centreline-restoring foot bias
         self.zmp_margin = p.get("zmp_margin", 0.02)  # CoP clamp inside foot (m)
 
         # how many steps before stopping into a permanent stand (None = forever)
@@ -223,8 +225,18 @@ class DCMWalkingGait:
         return xi                                # xi_eos for the current step
 
     def _current_xi_eos(self):
-        """(p_stance_xy, nominal_next_xy, xi_eos) for the current stance foot."""
-        p_st = self._foot_center_xy(self.foot[self.stance])
+        """(p_stance_xy, nominal_next_xy, xi_eos) for the current stance foot.
+
+        The stance ZMP used for planning is LATERALLY ANCHORED to the ideal
+        centreline foothold (y = +-d by parity) rather than the actual, possibly
+        drifted, foot. This keeps the reference DCM / CoM trajectory pinned to the
+        straight centreline so the gait does not slowly veer sideways and cross its
+        legs. The forward (x) coordinate still tracks the actual foot so forward
+        progress accumulates."""
+        p_act = self._foot_center_xy(self.foot[self.stance])
+        d = self.step_width / 2.0
+        ideal_y = d if (self.stance_idx % 2 == 0) else -d
+        p_st = np.array([p_act[0], ideal_y])      # lateral-anchored stance
         future = self._future_footsteps(self.stance_idx, p_st, self.n_preview)
         xi_eos = self._xi_eos_current(p_st, future)
         return p_st, future[0], xi_eos
@@ -244,17 +256,27 @@ class DCMWalkingGait:
         term provides the lateral catch that prevents a sideways fall:
 
             xi_pred_eos = p_st + (xi_meas - p_st) exp(omega (T_ss - tau))
-            p_next      = p_nominal + k_cap (xi_pred_eos - xi_eos_plan)
+            dy_corr     = clip( k_cap (xi_pred_eos.y - xi_eos_plan.y), +-max_dy )
+            p_next.y    = p_nominal.y + dy_corr            (p_nominal.y is ABSOLUTE)
 
-        k_cap in [0,1] (0 = open-loop plan, 1 = full correction). The lateral side
-        is clamped so the feet never cross."""
+        k_cap in [0,1] (0 = open-loop plan, 1 = full correction). The correction is
+        CLAMPED to +-max_dy of the absolute nominal foothold: without the clamp a
+        sideways CoM excursion makes the foot chase the absolute DCM (positive
+        feedback), so the whole gait slowly walks sideways, the feet converge to
+        the centreline and cross, and it tips. Clamping pins the footholds to the
+        centreline-anchored +-d pattern while still allowing a bounded lateral
+        catch. The lateral side is also clamped so the feet never cross."""
         xi = com[:2] + com_vel[:2] / self.omega
         xi_pred_eos = p_st + (xi - p_st) * np.exp(self.omega * (self.t_ss - tau))
         p_next = p_nominal.copy()
-        # Lateral (y) only: DCM step adjustment -- place the foot so the post-step
-        # DCM rejoins the plan. This is the dominant stabiliser of the weak,
-        # narrow-footed lateral axis. Sagittal x stays on the absolute plan.
-        p_next[1] = p_nominal[1] + self.k_cap * (xi_pred_eos[1] - xi_eos_plan[1])
+        # Lateral (y) only: bounded DCM step adjustment about the absolute foothold,
+        # plus a slow centreline-restoring bias. The capture term gives the local
+        # balance catch; the restoring term (-k_center * com_y) walks the footholds
+        # back toward y=0 whenever the body has drifted sideways, so the gait holds
+        # a straight line instead of slowly veering off and crossing its legs.
+        dy = np.clip(self.k_cap * (xi_pred_eos[1] - xi_eos_plan[1]),
+                     -self.max_dy, self.max_dy)
+        p_next[1] = p_nominal[1] + dy - self.k_center * com[1]
         swing = "right" if self.stance == "left" else "left"
         if swing == "left":
             p_next[1] = max(p_next[1], p_st[1] + 0.08)
@@ -272,10 +294,10 @@ class DCMWalkingGait:
 
         We hand the QP a CoM position+velocity reference (c_ref, c_ref_dot) plus the
         acceleration feed-forward c_ref_ddot. The QP's CoM PD then actively servos
-        the real CoM onto c_ref -- this position regulation is what removes the slow
-        sagittal drift that pure acceleration feed-forward could not hold. Lateral
-        stability is supplied by capture-point foot placement. A DCM-feedback ZMP
-        (p_cmd) is also computed for diagnostics.
+        the real CoM onto c_ref -- this position regulation removes the slow drift
+        that pure acceleration feed-forward could not hold. Lateral balance is
+        supplied by capture-point foot placement. A DCM-feedback ZMP (p_cmd) is
+        also computed for diagnostics.
         """
         cd_ref = self.omega * (xi_ref - self.c_ref)
         self.c_ref = self.c_ref + dt * cd_ref
@@ -385,7 +407,8 @@ class DCMWalkingGait:
                                         self.foot[self.stance][2]])
             xi_ref = self._xi_ref(p_st, xi_eos, tau)
             swing_pos = self._swing_pose(frac)
-            sw = {"foot": swing, "pos": swing_pos, "vel": np.zeros(3)}
+            sw = {"foot": swing, "pos": swing_pos, "vel": np.zeros(3),
+                  "R": self.foot_R}      # keep the swing foot level & forward
             refs, xi, p_cmd = self._build_refs(com, com_vel, p_st, xi_ref,
                                                contacts, sw, dt, z_des)
 

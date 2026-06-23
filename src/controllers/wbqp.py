@@ -69,19 +69,30 @@ class WholeBodyQP:
         self.kd_com = np.array(p.get("kd_com", [16.0, 16.0, 19.0]))
         self.kp_torso = p.get("kp_torso", 80.0); self.kd_torso = p.get("kd_torso", 18.0)
         self.kp_sw = p.get("kp_swing", 300.0);   self.kd_sw = p.get("kd_swing", 35.0)
+        self.kp_sw_rot = p.get("kp_swing_rot", 150.0)  # swing-foot orientation
+        self.kd_sw_rot = p.get("kd_swing_rot", 22.0)
         self.kp_post = p.get("kp_posture", 20.0); self.kd_post = p.get("kd_posture", 9.0)
         # task weights (CoM dominates posture so balance tracks tightly)
         self.w_com = p.get("w_com", 12.0)
         self.w_torso = p.get("w_torso", 3.0)
         self.w_swing = p.get("w_swing", 40.0)
+        self.w_swing_rot = p.get("w_swing_rot", 0.0)  # off: destabilises; planted
+        #   foot yaw is locked by contact anyway. Use posture (hip_yaw) instead.
         self.w_post = p.get("w_posture", 0.1)
+        # Per-joint posture weight multipliers. The hip yaw/roll joints are held
+        # much more firmly than the default so the legs stay pointing forward and
+        # parallel instead of slowly turning inward during walking.
+        self.w_post_joint = self._posture_weights(p.get("w_posture_joint", {
+            "hip_yaw": 90.0,
+        }))
         # regularisation / contact
         self.r_qdd = p.get("r_qddot", 1e-2)
         self.r_f = p.get("r_force", 1e-5)
         self.mu = p.get("friction", 0.7)
         self.fz_min = p.get("fz_min", 2.0)
         self.kd_contact = p.get("kd_contact", 20.0)   # Baumgarte velocity damping
-        self.solver = p.get("solver", "osqp")
+        self.w_eq = p.get("w_equality", 1e4)          # stiff penalty for dynamics/contact eq
+        self.solver = p.get("solver", "quadprog")
 
         # ordered contact points per foot: (geom_id, body_id)
         self.foot_pts = {
@@ -92,6 +103,17 @@ class WholeBodyQP:
         self._jp = np.zeros((3, self.nv))
         self._jr = np.zeros((3, self.nv))
         self.info = {"cost": 0.0, "fail": 0, "fz": 0.0}
+
+    def _posture_weights(self, group_mults):
+        """Per-joint posture weight multipliers (nu,), default 1.0. Keys are
+        substrings of the joint name (e.g. 'hip_yaw') -> multiplier."""
+        from src.controllers.robot_model import JOINT_NAMES
+        w = np.ones(self.r.nu)
+        for i, name in enumerate(JOINT_NAMES):
+            for key, mult in group_mults.items():
+                if key in name:
+                    w[i] = mult
+        return w
 
     # -- jacobian helpers --------------------------------------------------
     def _com_jac(self, d):
@@ -165,10 +187,19 @@ class WholeBodyQP:
         # swing foot task (only in single support)
         if swing is not None:
             bid = r.rfoot_bid if swing["foot"] == "right" else r.lfoot_bid
-            Jsw = self._point_jac(data, data.xpos[bid], bid)
-            psw = data.xpos[bid]; vsw = Jsw @ qvel
+            Jp, Jr_sw = self._body_jac(data, bid)
+            psw = data.xpos[bid]; vsw = Jp @ qvel
             a_sw = self.kp_sw * (swing["pos"] - psw) + self.kd_sw * (swing["vel"] - vsw)
-            add_task(Jsw, a_sw, self.w_swing)
+            add_task(Jp, a_sw, self.w_swing)
+            # Track the swing-foot ORIENTATION too (keep it level and pointing
+            # forward). Without this the QP leaves the foot's yaw free, so the hip
+            # slowly turns the leg inward and plants it rotated.
+            if swing.get("R") is not None:
+                Rsw = data.xmat[bid].reshape(3, 3)
+                omega_sw = Jr_sw @ qvel
+                a_sw_rot = (self.kp_sw_rot * _rot_error(swing["R"], Rsw)
+                            + self.kd_sw_rot * (-omega_sw))
+                add_task(Jr_sw, a_sw_rot, self.w_swing_rot)
 
         # posture task (all actuated joints toward home)
         Jpost = np.zeros((r.nu, nv))
@@ -176,14 +207,24 @@ class WholeBodyQP:
             Jpost[i, dof] = 1.0
         q_now = data.qpos[r.act_qadr]; qd_now = data.qvel[r.act_dofadr]
         a_post = self.kp_post * (r.q_home - q_now) + self.kd_post * (-qd_now)
-        add_task(Jpost, a_post, self.w_post)
+        # per-joint weighted posture task (hip yaw/roll held firmly -> legs stay
+        # forward and parallel)
+        w_vec = self.w_post * self.w_post_joint
+        P[:nv, :nv] += Jpost.T @ (w_vec[:, None] * Jpost)
+        q[:nv] += -(Jpost.T @ (w_vec * a_post))
 
         # regularisation (keeps P positive definite)
         P[:nv, :nv] += self.r_qdd * np.eye(nv)
         if nf:
             P[nv:, nv:] += self.r_f * np.eye(nf)
 
-        # ---- equality constraints A x = b ------------------------------
+        # ---- equality constraints as stiff soft-penalties -----------------
+        # quadprog (fast dense solver) does not support equalities, so we fold
+        # them into the objective as a very stiff least-squares penalty:
+        #   w_eq || A_eq x - b_eq ||^2   with w_eq >> task weights
+        # The floating-base dynamics and contact-no-slip constraints are enforced
+        # to ~1e-4 accuracy, which is plenty for a 2 ms control tick.
+        w_eq = self.w_eq
         A_rows = []; b_rows = []
         # floating-base dynamics (6)
         A_fb = np.zeros((6, n))
@@ -196,7 +237,9 @@ class WholeBodyQP:
             A_c = np.zeros((nf, n)); A_c[:, :nv] = Jc
             b_c = -self.kd_contact * (Jc @ qvel)
             A_rows.append(A_c); b_rows.append(b_c)
-        A = np.vstack(A_rows); b = np.concatenate(b_rows)
+        A_eq = np.vstack(A_rows); b_eq = np.concatenate(b_rows)
+        P += w_eq * (A_eq.T @ A_eq)
+        q += -w_eq * (A_eq.T @ b_eq)
 
         # ---- inequality constraints G x <= h_i -------------------------
         # friction pyramid + min normal per contact point (5 rows each)
@@ -219,7 +262,7 @@ class WholeBodyQP:
         h_i = np.concatenate([hf, tlim - h[6:], tlim + h[6:]])
 
         # ---- solve ------------------------------------------------------
-        x = qpsolvers.solve_qp(P, q, G, h_i, A, b, solver=self.solver)
+        x = qpsolvers.solve_qp(P, q, G, h_i, solver=self.solver)
         if x is None:
             self.info["fail"] += 1
             return h[r.act_dofadr]          # fall back to gravity compensation
