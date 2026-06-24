@@ -88,6 +88,7 @@ class DCMWalkingGait:
         self.k_dcm = p.get("k_dcm", 2.5)        # DCM feedback gain (>0 stabilises)
         self.k_cap = p.get("k_cap", 0.8)        # lateral DCM step-adjustment gain
         self.max_dy = p.get("max_dy", 0.06)     # clamp on lateral foot correction (m)
+        self.max_dx = p.get("max_dx", 0.04)     # clamp on sagittal foot correction (m)
         self.k_center = p.get("k_center", 0.0)  # centreline-restoring foot bias
         self.zmp_margin = p.get("zmp_margin", 0.02)  # CoP clamp inside foot (m)
 
@@ -96,6 +97,7 @@ class DCMWalkingGait:
 
         # safety abort thresholds
         self.max_tilt = p.get("max_tilt", 0.5)  # rad roll/pitch -> recover/stop
+
 
         # runtime (set in reset)
         self.z_c = None
@@ -269,7 +271,12 @@ class DCMWalkingGait:
         xi = com[:2] + com_vel[:2] / self.omega
         xi_pred_eos = p_st + (xi - p_st) * np.exp(self.omega * (self.t_ss - tau))
         p_next = p_nominal.copy()
-        # Lateral (y) only: bounded DCM step adjustment about the absolute foothold,
+        # Forward (x): bounded sagittal correction so the robot adapts to slopes
+        # and velocity disturbances rather than blindly following the absolute plan.
+        dx = np.clip(self.k_cap * (xi_pred_eos[0] - xi_eos_plan[0]),
+                     -self.max_dx, self.max_dx)
+        p_next[0] = p_nominal[0] + dx
+        # Lateral (y): bounded DCM step adjustment about the absolute foothold,
         # plus a slow centreline-restoring bias. The capture term gives the local
         # balance catch; the restoring term (-k_center * com_y) walks the footholds
         # back toward y=0 whenever the body has drifted sideways, so the gait holds
@@ -328,6 +335,7 @@ class DCMWalkingGait:
         com = state["com"]
         com_vel = state["com_vel"]
         rpy = state["base_rpy"]
+
         z_des = self._com_z()
 
         # ---- safety: a big tilt means we lost it; stop walking and try to stand
