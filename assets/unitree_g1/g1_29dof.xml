@@ -296,6 +296,18 @@
                0.20 -0.20 0 0.40 0 0 0"/>
   </keyframe>
 
+  <!-- Lock both hip-yaw joints at zero so the legs always point straight forward.
+       The joints still exist (the kinematic chain is unchanged) but MuJoCo's
+       constraint solver holds them at 0. The QP must balance without hip-yaw. -->
+  <equality>
+    <joint joint1="left_hip_yaw_joint"  polycoef="0 0 0 0 0"/>
+    <joint joint1="waist_yaw_joint"  polycoef="0 0 0 0 0"/>
+    <joint joint1="waist_roll_joint"  polycoef="0 0 0 0 0"/>
+    <!-- <joint joint1="waist_pitch_joint"  polycoef="0 0 0 0 0"/> -->
+    
+    <joint joint1="right_hip_yaw_joint" polycoef="0 0 0 0 0"/>
+  </equality>
+
   <!-- setup scene -->
   <statistic center="1.0 0.7 1.0" extent="0.8"/>
   <visual>

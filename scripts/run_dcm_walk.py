@@ -40,7 +40,9 @@ def main():
     ap.add_argument("--t-ss", type=float, default=0.30)
     ap.add_argument("--t-ds", type=float, default=0.12)
     ap.add_argument("--k-dcm", type=float, default=2.5)
-    ap.add_argument("--k-cap", type=float, default=1.0)
+    ap.add_argument("--k-cap", type=float, default=0.8)
+    ap.add_argument("--k-center", type=float, default=0.0,
+                    help="centreline-restoring foot bias (0 = off) to stop sideways drift")
     ap.add_argument("--max-steps", type=int, default=None)
     ap.add_argument("--kick", type=float, default=0.0)
     ap.add_argument("--seed", type=int, default=None)
@@ -55,6 +57,10 @@ def main():
         "step_length": args.step_length, "step_width": args.step_width,
         "t_ss": args.t_ss, "t_ds": args.t_ds,
         "k_dcm": args.k_dcm, "k_cap": args.k_cap, "max_steps": args.max_steps,
+        # centreline-restoring foot bias: when the body has drifted sideways, walk
+        # the footholds back toward y=0 so the gait holds a straight line instead
+        # of slowly veering off (which is what eventually crosses the legs / tips).
+        "k_center": args.k_center,
     })
     wbqp = WholeBodyQP(robot, {
         # tighten pelvis/torso orientation so the body does not pitch away while
@@ -63,7 +69,19 @@ def main():
         "kp_torso": 250.0, "kd_torso": 30.0, "w_torso": 12.0,
         # stronger sagittal CoM tracking + velocity damping to hold the forward
         # speed on the plan (stops the slow forward/backward creep)
-        "kp_com": [90.0, 60.0, 90.0], "kd_com": [28.0, 16.0, 19.0],
+        "kp_com": [90.0, 80.0, 90.0], "kd_com": [28.0, 20.0, 19.0], "w_com": 30.0,
+        # Keep the body straight and the legs forward/parallel:
+        #  - hip_yaw held firmly so the legs don't rotate inward and cross,
+        #  - waist yaw/roll/pitch held firmly so the TORSO stays aligned with the
+        #    (upright) pelvis instead of leaning over,
+        #  - hip_roll left free (lateral capture stepping needs it).
+        "kp_posture": 40.0,
+        "w_posture_joint": {"hip_yaw": 90.0},
+        # gently hold the SWING foot pointing forward (yaw) so the swing leg stops
+        # rotating inward each step (the source of the toe-in / leg crossing).
+        # Kept light so it does not fight the swing position task.
+        "w_swing_rot": 3.0, "kp_swing_rot": 80.0, "kd_swing_rot": 18.0,
+        "kp_swing": 400.0, "kd_swing": 40.0, "w_swing": 50.0,
     })
 
     robot.set_home(env.data)
