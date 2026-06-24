@@ -1,0 +1,27 @@
+
+services:
+  simulation:
+    build:
+      context: .
+      args:
+        USER_ID: 1000  
+        GROUP_ID: 1000 
+    image: biped_locomotion:latest
+    container_name: biped_simulation
+    # ENTRYPOINT is bare "python3"; this supplies the script + args to actually run.
+    # Without a command the container just opens an empty Python REPL and exits 0.
+    # Pick the scene with the SCENE env var, e.g.  SCENE=scene_stairs.xml docker compose up
+    command: ["scripts/run_dcm_walk.py", "--scene", "${SCENE:-scene.xml}"]
+    ipc: host
+    network_mode: host
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      # glx handles standard hardware acceleration; offscreen rendering can fall back cleanly
+      - MUJOCO_GL=glx
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./logs:/home/robotics/workspace/logs:rw
+    # Agnostic hardware mapping: access standard Linux graphics rendering infrastructure
+    devices:
+      - /dev/dri:/dev/dri

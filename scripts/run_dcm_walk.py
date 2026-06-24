@@ -19,6 +19,7 @@ import sys, os, time, argparse
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import numpy as np
+import mujoco
 from src.env.mujoco_env import MujocoEnv
 from src.controllers.robot_model import RobotModel, StateEstimator
 from src.controllers.dcm_gait import DCMWalkingGait
@@ -46,6 +47,13 @@ def main():
     ap.add_argument("--max-steps", type=int, default=None)
     ap.add_argument("--kick", type=float, default=0.0)
     ap.add_argument("--seed", type=int, default=None)
+    # Offscreen video recording (works headless via MUJOCO_GL=osmesa/egl). Writes
+    # an mp4 of the run; no interactive viewer needed, so it works in a container.
+    ap.add_argument("--video", default=None,
+                    help="path to write an mp4 of the run (e.g. out/walk.mp4)")
+    ap.add_argument("--fps", type=float, default=30.0, help="video frame rate")
+    ap.add_argument("--video-width", type=int, default=960)
+    ap.add_argument("--video-height", type=int, default=540)
     args = ap.parse_args()
 
     scene = os.path.abspath(os.path.join(os.path.dirname(__file__),
@@ -100,6 +108,34 @@ def main():
         except Exception:
             pass
 
+    # ---- optional offscreen video recorder ------------------------------------
+    # Renders the robot from a camera that tracks the pelvis and streams frames to
+    # an mp4. Frames are written every `frame_skip` sim steps to hit the target fps.
+    recorder = renderer = None
+    cam = None
+    frame_skip = 1
+    if args.video:
+        import imageio.v2 as imageio
+        # The MJCF's offscreen framebuffer defaults to 640x480; enlarge it so the
+        # renderer can produce the requested resolution.
+        env.model.vis.global_.offwidth = max(env.model.vis.global_.offwidth,
+                                              args.video_width)
+        env.model.vis.global_.offheight = max(env.model.vis.global_.offheight,
+                                               args.video_height)
+        renderer = mujoco.Renderer(env.model, height=args.video_height,
+                                   width=args.video_width)
+        renderer.scene.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = 1
+        cam = mujoco.MjvCamera()
+        cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
+        cam.trackbodyid = robot.pelvis_bid
+        cam.distance, cam.azimuth, cam.elevation = 3.0, 120.0, -15.0
+        frame_skip = max(1, int(round((1.0 / args.fps) / dt)))
+        os.makedirs(os.path.dirname(os.path.abspath(args.video)) or ".", exist_ok=True)
+        recorder = imageio.get_writer(args.video, fps=args.fps, macro_block_size=None)
+        logger.info(f"recording video -> {args.video} "
+                    f"({args.video_width}x{args.video_height} @ {args.fps:g}fps, "
+                    f"1 frame / {frame_skip} steps)")
+
     logger.info(f"DCM walking: mass={env.model.body_mass.sum():.1f}kg dt={dt:.4f} "
                 f"step_len={args.step_length} step_w={args.step_width} "
                 f"T_ss={args.t_ss} T_ds={args.t_ds} k_dcm={args.k_dcm} k_cap={args.k_cap}")
@@ -119,6 +155,10 @@ def main():
                                com_acc_ff=refs["com_acc_ff"])
             env.data.ctrl[:] = tau
             env.step()
+
+            if recorder is not None and n % frame_skip == 0:
+                renderer.update_scene(env.data, cam)
+                recorder.append_data(renderer.render())
 
             t = env.data.time - start
             n += 1
@@ -158,6 +198,10 @@ def main():
                     f"steps={gait.step_count} fell={fell} "
                     f"pelvis_z={env.data.qpos[2]:.3f} "
                     f"travel=({travel[0]:+.3f},{travel[1]:+.3f}) m")
+        if recorder is not None:
+            recorder.close()
+            renderer.close()
+            logger.info(f"video saved -> {args.video}")
         if not args.headless:
             time.sleep(0.3); env.close_viewer()
 
