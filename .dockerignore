@@ -1,0 +1,29 @@
+# Version control / CI
+.git
+.gitignore
+.github
+
+# Python caches and build artifacts
+__pycache__
+*.pyc
+*.pyo
+.mypy_cache
+.ruff_cache
+.pytest_cache
+*.egg-info
+
+# Local virtualenv
+.venv/
+
+# Runtime / generated output (logs come from src/utils/data_logger.py)
+logs/
+outputs/
+checkpoints/
+
+# Documentation (datasheets, lecture PDFs, handouts) — not needed at runtime
+docs/
+*.md
+
+# Docker files themselves
+Dockerfile
+.dockerignore
