@@ -76,42 +76,44 @@ Teams will be evaluated based on their ability to achieve stable continuous walk
 ## Runbook
 
 ### Prerequisites
+* **Linux Host Engine** with Docker installed.
+* **X11 Display Server** running natively for 3D physics engine visualization.
+* **Direct Rendering Infrastructure (`/dev/dri`)** for hardware-accelerated graphics pipelines.
 
-- Python 3.10+
-- [MuJoCo](https://github.com/google-deepmind/mujoco) physics engine
+>[!WARNING]
+> It is tested and well working in Debian based operating systems like Ubuntu
 
-Install dependencies:
+---
 
-```bash
-pip install mujoco numpy pyyaml
-```
+### Execution Sequence
 
-### Repository Structure
-
-```
-ECE_DK801-Robotics-Systems-I/
-├── assets/unitree_g1/      # MJCF/URDF robot model and meshes
-├── config/                 # Runtime parameters (YAML)
-├── docs/                   # Datasheets, books, and papers
-├── logs/                   # Generated at runtime by DataLogger
-├── scripts/                # Executable entry points
-└── src/                    # Reusable library modules
-    ├── env/                # MuJoCo environment wrapper
-    ├── controllers/        # Control algorithms
-    └── utils/              # Logging and helper utilities
-```
-
-### Running the Passive Stability Test
-
-Verifies that the G1 robot can stand passively for 2 seconds with zero control input.
+Execute the following commands sequentially inside your host terminal:
 
 ```bash
-# From the project root
-python scripts/run_passive_test.py
+# 1. Pull the concrete snapshot image from GHCR
+docker pull ghcr.io/stavros-stathopoulos/biped-locomotion-simulation-only-walking-control:sha-f67cee8
+
+# 2. Grant the local container authority to connect to your host's display server
+xhost +local:root
+
+# 3. Execute the simulation loop using explicit system and graphic-device mappings
+docker run -it --rm \
+  --name biped_simulation \
+  --ipc=host \
+  --net=host \
+  -e DISPLAY=$DISPLAY \
+  -e QT_X11_NO_MITSHM=1 \
+  -e MUJOCO_GL=glx \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
+  --device /dev/dri:/dev/dri \
+  ghcr.io/stavros-stathopoulos/biped-locomotion-simulation-only-walking-control:sha-f67cee8 \
+  scripts/run_dcm_walk.py --scene scene.xml
+
+# 4. Immediately revoke screen permissions once the simulation exits
+xhost -local:root
 ```
-
-The script loads `assets/unitree_g1/scene.xml`, resets to the `stand` keyframe, and runs the simulation at 500 Hz. A MuJoCo viewer window opens automatically. The test passes if the robot does not collapse within 2 simulated seconds.
-
+>[!TIP]
+>Instead of `--scene scene.xml` you can use also `--scene scene_stairs.xml` or `--scene scene_tilted.xml`
 ---
 
 ## References
