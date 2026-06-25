@@ -91,7 +91,7 @@ Execute the following commands sequentially inside your host terminal:
 
 ```bash
 # 1. Pull the concrete snapshot image from GHCR
-docker pull ghcr.io/stavros-stathopoulos/biped-locomotion-simulation-only-walking-control:sha-f67cee8
+docker pull ghcr.io/stavros-stathopoulos/biped-locomotion-simulation-only-walking-control:latest
 
 # 2. Grant the local container authority to connect to your host's display server
 xhost +local:root
@@ -106,7 +106,7 @@ docker run -it --rm \
   -e MUJOCO_GL=glx \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri:/dev/dri \
-  ghcr.io/stavros-stathopoulos/biped-locomotion-simulation-only-walking-control:sha-f67cee8 \
+  ghcr.io/stavros-stathopoulos/biped-locomotion-simulation-only-walking-control:sha-latest \
   scripts/run_dcm_walk.py --scene scene.xml
 
 # 4. Immediately revoke screen permissions once the simulation exits
