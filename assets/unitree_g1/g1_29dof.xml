@@ -296,17 +296,23 @@
                0.20 -0.20 0 0.40 0 0 0"/>
   </keyframe>
 
-  <!-- Lock both hip-yaw joints at zero so the legs always point straight forward.
-       The joints still exist (the kinematic chain is unchanged) but MuJoCo's
-       constraint solver holds them at 0. The QP must balance without hip-yaw. -->
+  <!-- Hip-yaw (L/R) and waist yaw/roll are NO LONGER hard-locked here. They are
+       now held SOFTLY by the whole-body QP's joint-hold policy (hold_joints /
+       w_hold / kp_hold in scripts/run_dcm_walk.py + src/controllers/wbqp.py), so
+       they remain genuinely free DoF that merely receive a small restoring torque
+       each control tick. To restore the original RIGID mechanical lock, uncomment
+       the <equality> block below (and set hold_joints: [] in run_dcm_walk.py).
+       NOTE: this lock was shared by every script that loads this model; the older
+       WalkingController (run_walking.py) holds these joints with stiff joint PD
+       anyway, so removing it does not destabilise that stack. -->
+  <!--
   <equality>
     <joint joint1="left_hip_yaw_joint"  polycoef="0 0 0 0 0"/>
-    <joint joint1="waist_yaw_joint"  polycoef="0 0 0 0 0"/>
-    <joint joint1="waist_roll_joint"  polycoef="0 0 0 0 0"/>
-    <!-- <joint joint1="waist_pitch_joint"  polycoef="0 0 0 0 0"/> -->
-    
+    <joint joint1="waist_yaw_joint"     polycoef="0 0 0 0 0"/>
+    <joint joint1="waist_roll_joint"    polycoef="0 0 0 0 0"/>
     <joint joint1="right_hip_yaw_joint" polycoef="0 0 0 0 0"/>
   </equality>
+  -->
 
   <!-- setup scene -->
   <statistic center="1.0 0.7 1.0" extent="0.8"/>

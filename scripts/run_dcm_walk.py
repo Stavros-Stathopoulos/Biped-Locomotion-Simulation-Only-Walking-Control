@@ -78,13 +78,31 @@ def main():
         # stronger sagittal CoM tracking + velocity damping to hold the forward
         # speed on the plan (stops the slow forward/backward creep)
         "kp_com": [90.0, 80.0, 90.0], "kd_com": [28.0, 20.0, 19.0], "w_com": 30.0,
-        # Keep the body straight and the legs forward/parallel:
-        #  - hip_yaw held firmly so the legs don't rotate inward and cross,
-        #  - waist yaw/roll/pitch held firmly so the TORSO stays aligned with the
-        #    (upright) pelvis instead of leaning over,
-        #  - hip_roll left free (lateral capture stepping needs it).
+        # General posture task: weakly pulls every actuated joint toward the home
+        # crouch. Kept uniform now (hip_roll stays free for lateral capture
+        # stepping); the joints that must NOT move are handled by the dedicated
+        # soft joint-hold policy below instead of per-joint posture weights.
         "kp_posture": 40.0,
-        "w_posture_joint": {"hip_yaw": 90.0},
+        "w_posture_joint": {},
+        # ---- SOFT JOINT-HOLD POLICY (replaces the MJCF <equality> hard locks) --
+        # hip_yaw L/R + waist_yaw + waist_roll are now FREE joints that the QP
+        # holds near 0 with a soft restoring PD, so the legs stay forward/parallel
+        # and the torso stays square to the pelvis without a rigid constraint.
+        #
+        # >>> THIS IS THE ONE PLACE TO TUNE THE HOLD <<<
+        #   w_hold  : how hard the QP prioritises holding (soft ~1-3; firm ~10-40;
+        #             near-rigid lock ~60-80). Raise this FIRST if the legs start
+        #             to toe-in/cross or the torso twists.
+        #   kp_hold : restoring stiffness toward 0 (rad/s^2 per rad); raise for a
+        #             tighter hold (e.g. 60 -> 150 -> 200).
+        #   kd_hold : damping (rad/s^2 per rad/s); keep ~ 2*sqrt(kp_hold) so the
+        #             hold settles without ringing.
+        #   hold_joints : which joints to hold (name substrings). Drop one to free
+        #             it, or re-add it. To restore the original RIGID behaviour,
+        #             set hold_joints: [] and re-enable the <equality> block in
+        #             assets/unitree_g1/g1_29dof.xml.
+        "hold_joints": ["hip_yaw", "waist_yaw", "waist_roll"],
+        "w_hold": 10.0, "kp_hold": 60.0, "kd_hold": 12.0,
         # gently hold the SWING foot pointing forward (yaw) so the swing leg stops
         # rotating inward each step (the source of the toe-in / leg crossing).
         # Kept light so it does not fight the swing position task.

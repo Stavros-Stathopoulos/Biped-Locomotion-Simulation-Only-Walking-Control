@@ -85,6 +85,19 @@ class WholeBodyQP:
         self.w_post_joint = self._posture_weights(p.get("w_posture_joint", {
             "hip_yaw": 90.0,
         }))
+        # ---- soft joint-hold policy (replaces the MJCF <equality> hard locks) --
+        # Holds a chosen set of joints near their home angle with a restoring PD
+        # instead of a rigid model constraint, so the hip-yaw / waist yaw/roll
+        # joints stay put now that their <equality> locks are removed -- they are
+        # real DoF that merely receive a small corrective torque each tick.
+        # Opt-in: with the default (no joints) every other caller is unchanged.
+        #   hold_joints     : name substrings to hold ('hip_yaw' -> L+R hip-yaw)
+        #   w_hold          : QP priority of the hold (soft ~1-3, rigid-lock ~60-80)
+        #   kp_hold/kd_hold : restoring stiffness / damping of the hold
+        self.hold_mask = self._joint_mask(p.get("hold_joints", []))
+        self.w_hold = p.get("w_hold", 2.0)
+        self.kp_hold = p.get("kp_hold", 60.0)
+        self.kd_hold = p.get("kd_hold", 12.0)
         # regularisation / contact
         self.r_qdd = p.get("r_qddot", 1e-2)
         self.r_f = p.get("r_force", 1e-5)
@@ -114,6 +127,16 @@ class WholeBodyQP:
                 if key in name:
                     w[i] = mult
         return w
+
+    def _joint_mask(self, name_keys):
+        """Boolean mask (nu,) selecting actuated joints whose name contains any of
+        the given substrings (e.g. 'hip_yaw' -> both left/right hip-yaw joints)."""
+        from src.controllers.robot_model import JOINT_NAMES
+        mask = np.zeros(self.r.nu, dtype=bool)
+        for i, name in enumerate(JOINT_NAMES):
+            if any(key in name for key in name_keys):
+                mask[i] = True
+        return mask
 
     # -- jacobian helpers --------------------------------------------------
     def _com_jac(self, d):
@@ -212,6 +235,20 @@ class WholeBodyQP:
         w_vec = self.w_post * self.w_post_joint
         P[:nv, :nv] += Jpost.T @ (w_vec[:, None] * Jpost)
         q[:nv] += -(Jpost.T @ (w_vec * a_post))
+
+        # soft joint-hold policy: pin the selected joints (by default the formerly
+        # hard-locked hip_yaw L/R + waist yaw/roll) to their home angle with a
+        # restoring PD. Soft by default so it does not fight the leg/CoM tasks --
+        # tune via w_hold/kp_hold/kd_hold (see WholeBodyQP.__init__).
+        if self.hold_mask.any():
+            hidx = np.where(self.hold_mask)[0]
+            Jhold = np.zeros((hidx.size, nv))
+            for row, j in enumerate(hidx):
+                Jhold[row, r.act_dofadr[j]] = 1.0
+            qh = data.qpos[r.act_qadr[hidx]]
+            qdh = data.qvel[r.act_dofadr[hidx]]
+            a_hold = self.kp_hold * (r.q_home[hidx] - qh) + self.kd_hold * (-qdh)
+            add_task(Jhold, a_hold, self.w_hold)
 
         # regularisation (keeps P positive definite)
         P[:nv, :nv] += self.r_qdd * np.eye(nv)
