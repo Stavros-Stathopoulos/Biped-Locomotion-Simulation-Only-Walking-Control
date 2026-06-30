@@ -106,7 +106,7 @@ docker run -it --rm \
   -e MUJOCO_GL=glx \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   --device /dev/dri:/dev/dri \
-  ghcr.io/stavros-stathopoulos/biped-locomotion-simulation-only-walking-control:sha-latest \
+  ghcr.io/stavros-stathopoulos/biped-locomotion-simulation-only-walking-control:latest \
   scripts/run_dcm_walk.py --scene scene.xml
 
 # 4. Immediately revoke screen permissions once the simulation exits
